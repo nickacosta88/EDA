@@ -1,0 +1,368 @@
+---
+title: "EDA Modeling"
+author: "Nick Acosta"
+format: html
+editor: visual
+---
+
+## Reading the Dataset
+
+```{r}
+
+getwd()
+cleaned_EDA <- read.csv("cleaned_application_test_merged.csv")
+print(cleaned_EDA)
+```
+
+## Clean the EDA Data
+
+```{r}
+
+library(skimr)
+library(janitor)
+library(dplyr )
+
+
+skim(cleaned_EDA)
+
+application_train <- clean_names(cleaned_EDA)
+
+missing_data <- application_train %>%
+  summarise(across(everything(), ~sum(is.na(.)) / n()))
+
+
+View(missing_data)
+
+# Impute missing values in ext_source_1 with the median
+application_train$ext_source_1[is.na(application_train$ext_source_1)] <- 
+  median(application_train$ext_source_1, na.rm = TRUE)
+
+# Drop columns (that aren't important) with high missing values
+application_train <- application_train %>%
+  select(-c(occupation_type, apartments_avg, basementarea_avg, 
+            years_build_avg, commonarea_avg, elevators_avg))
+
+# List of columns to remove based on the previous selection
+columns_to_remove <- c(
+    'FLOORSMAX_MODE', 'FLOORSMAX_MEDI', 'FLOORSMAX_AVG', 'FLOORSMIN_MODE', 'FLOORSMIN_MEDI', 'FLOORSMIN_AVG',
+    'NONLIVINGAPARTMENTS_MODE', 'NONLIVINGAPARTMENTS_MEDI', 'NONLIVINGAPARTMENTS_AVG',
+    'APARTMENTS_MODE', 'APARTMENTS_MEDI', 'APARTMENTS_AVG',
+    'BASEMENTAREA_MODE', 'BASEMENTAREA_MEDI', 'BASEMENTAREA_AVG',
+    'COMMONAREA_MODE', 'COMMONAREA_MEDI', 'COMMONAREA_AVG',
+    'ELEVATORS_MODE', 'ELEVATORS_MEDI', 'ELEVATORS_AVG',
+    'ENTRANCES_MODE', 'ENTRANCES_MEDI', 'ENTRANCES_AVG',
+    'YEARS_BEGINEXPLUATATION_MODE', 'YEARS_BEGINEXPLUATATION_MEDI', 'YEARS_BEGINEXPLUATATION_AVG',
+    'YEARS_BUILD_MODE', 'YEARS_BUILD_MEDI', 'YEARS_BUILD_AVG',
+    'LANDAREA_MODE', 'LANDAREA_MEDI', 'LANDAREA_AVG',
+    'LIVINGAPARTMENTS_MODE', 'LIVINGAPARTMENTS_MEDI', 'LIVINGAPARTMENTS_AVG',
+    'LIVINGAREA_MODE', 'LIVINGAREA_MEDI', 'LIVINGAREA_AVG',
+    'NONLIVINGAREA_MODE', 'NONLIVINGAREA_MEDI', 'NONLIVINGAREA_AVG',
+    'FONDKAPREMONT_MODE', 'HOUSETYPE_MODE', 'WALLSMATERIAL_MODE', 'EMERGENCYSTATE_MODE'
+)
+
+# Drop these columns from the traindata dataset
+application_train <- application_train[, !(names(application_train) %in% columns_to_remove)]
+
+# Identify rows where amt_income_total exceeds a high threshold (e.g., above 10 million)
+outlier_rows <- application_train %>% filter(amt_income_total > 10000000)
+
+# Display the outlier rows within RMarkdown (this will print the table in the output)
+print(outlier_rows)
+
+# Alternatively, you can display just the top rows to keep it concise
+head(outlier_rows)
+
+# Calculate the 99th percentile for amt_income_total
+quantile_99 <- quantile(application_train$amt_income_total, 0.99, na.rm = TRUE)
+
+print(quantile_99)
+
+# Cap the value of amt_income_total for Client 1 (ID: 114967)
+application_train$amt_income_total <- ifelse(application_train$amt_income_total > quantile_99, 
+                                             quantile_99, 
+                                             application_train$amt_income_total)
+
+# Select numeric columns for correlation analysis
+numeric_cols <- application_train %>% select_if(is.numeric)
+
+# Create a synthetic credit-to-income ratio
+cleaned_EDA <- cleaned_EDA %>%
+  mutate(credit_income_ratio = amt_credit / amt_income_total)
+
+# Define a synthetic TARGET based on credit_income_ratio
+# For demonstration, we'll assume customers with a credit_income_ratio > 0.5 are flagged as "1" (potential default)
+cleaned_EDA <- cleaned_EDA %>%
+  mutate(TARGET = ifelse(credit_income_ratio > 0.5, 1, 0))  # Adjust threshold as needed
+
+# Calculate the majority class accuracy benchmark
+majority_class <- as.numeric(names(which.max(table(cleaned_EDA$TARGET))))
+majority_class_proportion <- max(prop.table(table(cleaned_EDA$TARGET)))
+
+cat("Majority class:", majority_class, "\n")
+cat("Majority class accuracy benchmark:", majority_class_proportion * 100, "%\n")
+
+# Compute correlation matrix for numeric columns, using 'complete.obs' to ignore missing values
+cor_matrix <- cor(numeric_cols, use = "complete.obs")
+
+# Ensure TARGET is in the dataset
+if(!"TARGET" %in% names(cleaned_EDA)) {
+  stop("TARGET variable is not found in the dataset.")
+}
+
+# Calculate correlation matrix with TARGET included
+cor_matrix <- cor(cleaned_EDA %>% select_if(is.numeric), use = "complete.obs")
+
+# Extract correlations with TARGET if it exists
+if("TARGET" %in% rownames(cor_matrix)) {
+  cor_target <- cor_matrix["TARGET", ]
+  print(cor_target)
+} else {
+  cat("The TARGET variable is missing in the correlation matrix.")
+}
+
+# Sort correlations in descending order to highlight stronger relationships
+cor_target_sorted <- sort(cor_target, decreasing = TRUE)
+print(cor_target_sorted)
+
+columns_to_remove <- c(
+  "sk_id_curr", "cnt_children", "amt_income_total", "amt_credit", "amt_annuity", 
+  "amt_goods_price", "region_population_relative", "days_birth", "days_employed", 
+  "days_registration", "days_id_publish", "flag_mobil", "flag_emp_phone", 
+  "flag_work_phone", "flag_cont_mobile", "flag_phone", "flag_email", 
+  "cnt_fam_members", "region_rating_client", "region_rating_client_w_city", 
+  "hour_appr_process_start", "reg_region_not_live_region", "reg_region_not_work_region", 
+  "live_region_not_work_region", "reg_city_not_live_city", "reg_city_not_work_city", 
+  "live_city_not_work_city", "ext_source_1", "ext_source_2", "ext_source_3", 
+  "years_beginexpluatation_avg", "entrances_avg", "floorsmax_avg", "floorsmin_avg", 
+  "landarea_avg", "livingapartments_avg", "livingarea_avg", "nonlivingapartments_avg", 
+  "nonlivingarea_avg", "apartments_mode", "basementarea_mode", "years_beginexpluatation_mode", 
+  "years_build_mode", "commonarea_mode", "elevators_mode", "entrances_mode", 
+  "floorsmax_mode", "floorsmin_mode", "landarea_mode", "livingapartments_mode", 
+  "livingarea_mode", "nonlivingapartments_mode", "nonlivingarea_mode", 
+  "apartments_medi", "basementarea_medi", "years_beginexpluatation_medi", 
+  "years_build_medi", "commonarea_medi", "elevators_medi", "entrances_medi", 
+  "floorsmax_medi", "floorsmin_medi", "landarea_medi", "livingapartments_medi", 
+  "livingarea_medi", "nonlivingapartments_medi", "nonlivingarea_medi", 
+  "totalarea_mode", "obs_30_cnt_social_circle", "def_30_cnt_social_circle", 
+  "obs_60_cnt_social_circle", "def_60_cnt_social_circle", "days_last_phone_change", 
+  "flag_document_2", "flag_document_3", "flag_document_4", "flag_document_5", 
+  "flag_document_6", "flag_document_7", "flag_document_8", "flag_document_9", 
+  "flag_document_10", "flag_document_11", "flag_document_12", "flag_document_13", 
+  "flag_document_14", "flag_document_15", "flag_document_16", "flag_document_17", 
+  "flag_document_18", "flag_document_19", "flag_document_20", "flag_document_21", 
+  "amt_req_credit_bureau_hour", "amt_req_credit_bureau_day", "amt_req_credit_bureau_week", 
+  "amt_req_credit_bureau_mon", "amt_req_credit_bureau_qrt", "amt_req_credit_bureau_year"
+)
+
+# Remove these columns from the dataset
+cleaned_EDA <- cleaned_EDA[ , !(names(cleaned_EDA) %in% columns_to_remove)]
+
+# Calculate the percentage of missing values in each column
+missing_data <- colSums(is.na(cleaned_EDA))
+missing_percentage <- (missing_data / nrow(cleaned_EDA)) * 100
+
+
+print(missing_percentage)
+
+# Remove the 'own_car_age' column due to a high percentage of missing values
+cleaned_EDA <- cleaned_EDA[ , !(names(cleaned_EDA) %in% "own_car_age")]
+
+# Check the column names to see if 'own_car_age' has been removed
+colnames(cleaned_EDA)
+
+```
+
+## Correlation Analysis
+
+```{r}
+
+# Display the column names of the dataset
+colnames(cleaned_EDA)
+
+# Load necessary libraries
+library(tidyr)
+
+# Convert categorical columns to factor if not already
+categorical_cols <- c("name_contract_type", "code_gender", "flag_own_car", "flag_own_realty", 
+                      "name_type_suite", "name_income_type", "name_education_type", 
+                      "name_family_status", "name_housing_type", "occupation_type", 
+                      "weekday_appr_process_start", "organization_type", "fondkapremont_mode", 
+                      "housetype_mode", "wallsmaterial_mode", "emergencystate_mode")
+
+cleaned_EDA[categorical_cols] <- lapply(cleaned_EDA[categorical_cols], as.factor)
+
+# Summary for categorical columns
+categorical_summary <- cleaned_EDA %>%
+  select(all_of(categorical_cols)) %>%
+  summary()
+
+# Summary statistics for numeric columns
+numeric_cols <- c("apartments_avg", "basementarea_avg", "years_build_avg", "commonarea_avg", 
+                  "elevators_avg", "bureau_credit_count", "bureau_total_credit_amount", 
+                  "bureau_average_credit_amount", "bureau_credit_active_count", 
+                  "bureau_credit_closed_count", "credit_income_ratio", "TARGET")
+
+numeric_summary <- cleaned_EDA %>%
+  select(all_of(numeric_cols)) %>%
+  summary()
+
+# Print summaries
+print("Categorical Columns Summary:")
+print(categorical_summary)
+
+print("Numeric Columns Summary:")
+print(numeric_summary)
+
+# Correlation analysis for numeric variables
+library(corrplot)
+
+numeric_vars <- cleaned_EDA %>%
+  select_if(is.numeric)
+
+cor_matrix <- cor(numeric_vars, use = "complete.obs")
+corrplot(cor_matrix, method = "circle", type = "lower", tl.cex = 0.7)
+
+# Visualizing the distribution of 'amt_credit' using a histogram
+library(ggplot2)
+
+ggplot(cleaned_EDA, aes(x = TARGET)) +
+  geom_histogram(bins = 50, fill = "blue", alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Distribution of the TARGET", x = "TARGET", y = "Count")
+
+# Boxplot for credit range by age group
+ggplot(cleaned_EDA, aes(x = credit_income_ratio, y = TARGET, fill = )) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Credit Income Ratio to TARGET", x = "Credit Income Ratio", y = "TARGET")
+
+```
+
+## Splitting the Data and Cross-Validation Implementation
+
+```{r}
+
+# Load necessary libraries
+library(caret)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Apply the same levels to categorical columns in validation_data
+for (col in names(train_data)[categorical_cols]) {
+    validation_data[[col]] <- factor(validation_data[[col]], levels = levels(train_data[[col]]))
+}
+
+logistic_model <- train(
+  TARGET ~ .,  # assuming TARGET is the outcome variable
+  data = train_data, 
+  method = "glm",
+  family = "binomial",
+  trControl = train_control
+)
+
+
+# Re-run the prediction after confirming all levels match
+logistic_preds <- predict(logistic_model, newdata = validation_data)
+
+# Check lengths again
+print(length(logistic_preds))       # Should now match validation_data$target length
+print(length(validation_data$target))
+
+# Proceed if lengths match
+if (length(logistic_preds) == length(validation_data$target)) {
+    # Confusion matrix for logistic model
+    confusionMatrix(logistic_preds, validation_data$target)
+} else {
+    stop("Length mismatch persists between predictions and validation target.")
+}
+
+
+
+```
+
+## Performance Benchmark
+
+```{r}
+
+library(dplyr)
+library(caret)
+
+# 1. Create a synthetic target variable (e.g., 10% 'defaulted' class)
+set.seed(42)
+cleaned_EDA <- cleaned_EDA %>%
+  mutate(TARGET = factor(sample(c(0, 1), size = n(), replace = TRUE, prob = c(0.9, 0.1))))
+
+# Check for missing values in the target
+if (any(is.na(cleaned_EDA$TARGET))) {
+  cat("Missing values found in TARGET, replacing with mode.\n")
+  cleaned_EDA$TARGET[is.na(cleaned_EDA$TARGET)] <- 0
+}
+
+# 2. Split data into training and validation sets
+set.seed(42)
+train_index <- createDataPartition(cleaned_EDA$TARGET, p = 0.7, list = FALSE)
+train_data <- cleaned_EDA[train_index, ]
+validation_data <- cleaned_EDA[-train_index, ]
+
+# 3. Calculate the majority class benchmark
+majority_class_proportion <- max(prop.table(table(train_data$TARGET)))
+cat("Majority class accuracy benchmark:", majority_class_proportion * 100, "%\n")
+
+```
+
+## Logistic Regression Modeling
+
+```{r}
+
+# Model 1: Using basic categorical predictors
+model1 <- glm(TARGET ~ name_contract_type + code_gender + flag_own_car + 
+              flag_own_realty + name_type_suite + name_income_type + 
+              name_education_type + name_family_status + 
+              name_housing_type + occupation_type + 
+              weekday_appr_process_start + organization_type + 
+              apartments_avg + basementarea_avg + years_build_avg + 
+              commonarea_avg + elevators_avg + 
+              fondkapremont_mode + wallsmaterial_mode + 
+              emergencystate_mode + bureau_credit_count + 
+              bureau_total_credit_amount + bureau_average_credit_amount + 
+              bureau_credit_active_count + bureau_credit_closed_count, 
+              data = train_data, family = binomial)
+
+print(model1)
+
+# Model 2: Adding some interaction terms
+model2 <- glm(TARGET ~ name_income_type * code_gender + 
+              credit_income_ratio + bureau_average_credit_amount + 
+              flag_own_car + flag_own_realty, 
+              data = train_data, family = binomial)
+
+print(model2)
+
+evaluate_model <- function(model, validation_data) {
+  # Generate predictions
+  preds <- predict(model, newdata = validation_data, type = "response")
+  predicted_classes <- ifelse(preds > 0.5, 1, 0)
+  
+  # Calculate confusion matrix and accuracy
+  conf_matrix <- confusionMatrix(as.factor(predicted_classes), as.factor(validation_data$TARGET))
+  accuracy <- conf_matrix$overall['Accuracy']
+  
+  # Calculate AUC
+  roc_curve <- roc(validation_data$TARGET, preds)
+  auc <- auc(roc_curve)
+  
+  return(list(accuracy = accuracy, auc = auc))
+}
+
+# Evaluate Model 1
+model1_performance <- evaluate_model(model1, validation_data)
+cat("Model 1 - Accuracy:", model1_performance$accuracy, "\n")
+cat("Model 1 - AUC:", model1_performance$auc, "\n")
+
+# Evaluate Model 2
+model2_performance <- evaluate_model(model2, validation_data)
+cat("Model 2 - Accuracy:", model2_performance$accuracy, "\n")
+cat("Model 2 - AUC:", model2_performance$auc, "\n")
+
+```
